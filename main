@@ -7,6 +7,9 @@
 
 // I cant say this enough; https://vulkan-tutorial.com/en/ <-- this is an amazing guy for doing this this website turtorial
 
+
+// just so I remember: indices[] is the array for loaded model verticies
+
 #define GLM_ENABLE_EXPERIMENTAL
 #include <../glm/gtx/hash.hpp>
 #define GLFW_INCLUDE_VULKAN
@@ -42,9 +45,10 @@
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
 
-std::string MODEL_PATH = "model/bugbear.obj";
+int modelCount = 9;
+std::string MODEL_PATH = "model/1.obj";
 std::string TEXTURE_PATH = "textures/texture.png";
-std::string MODEL_PATH2 = "model/bugbear.obj";
+std::string MODEL_PATH2 = "model/2.obj";
 std::string TEXTURE_PATH2 = "textures/texture.png";
 
 
@@ -164,6 +168,8 @@ namespace std { // hash functions are the idea of returning a hash code to see i
     };
 }
 
+
+
 struct UniformBufferObject {
     alignas(16) glm::mat4 model; //4x4 matrix --> alligned to 16 byte boundary
     alignas(16) glm::mat4 view; //4x4  --> alligned to 16 byte boundary
@@ -257,14 +263,15 @@ private:
     VkImageView textureImageView;
     VkSampler textureSampler;
 
-    std::vector<Vertex> vertices;
-    std::vector<uint32_t> indices; // loading indices var; ^ is for vertex(s)
+    std::vector < std::vector<Vertex> > vertices;
+    std::vector < std::vector<uint32_t> > indices; // loading indices var; is for vertexes to be stored --> this is a vector of vector to allow storage of many models dynamically... yes I'm inconsistant... lucky this is my personal project...
 
-    VkBuffer vertexBuffer; // store the vertex buffer
-    VkDeviceMemory vertexBufferMemory; // store buffer memory
 
-    VkBuffer indexBuffer; // store index data
-    VkDeviceMemory indexBufferMemory; // index ram storage
+    std::vector <VkBuffer> vertexBuffer; // store the vertex buffer
+    std::vector <VkDeviceMemory> vertexBufferMemory; // store buffer memory
+
+    std::vector <VkBuffer> indexBuffer; // store index data
+    std::vector <VkDeviceMemory> indexBufferMemory; // index ram storage
 
     std::vector<VkBuffer> uniformBuffers;
     std::vector<VkDeviceMemory> uniformBuffersMemory;
@@ -390,11 +397,14 @@ private:
 
         vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 
-        vkDestroyBuffer(device, indexBuffer, nullptr);
-        vkFreeMemory(device, indexBufferMemory, nullptr);
+        for (int i = 0; i < indexBuffer.size(); i++) {
+            vkDestroyBuffer(device, indexBuffer[i], nullptr);
+            vkFreeMemory(device, indexBufferMemory[i], nullptr);
 
-        vkDestroyBuffer(device, vertexBuffer, nullptr);
-        vkFreeMemory(device, vertexBufferMemory, nullptr);
+            vkDestroyBuffer(device, vertexBuffer[i], nullptr);
+            vkFreeMemory(device, vertexBufferMemory[i], nullptr);
+        }
+
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
             vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
@@ -876,7 +886,7 @@ private:
             vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO; // format of vertex
 
             auto bindingDescription = Vertex::getBindingDescription(); // binding description
-            auto attributeDescriptions = Vertex::getAttributeDescriptions(); // attribute description
+            auto attributeDescriptions = Vertex::getAttributeDescriptions(); // attribute description --> shader controls offset of texture on 3d model; also use this for offsets; so make this offset value changed to shift in unison
 
             vertexInputInfo.vertexBindingDescriptionCount = 1; // 1 vertex descriptors
             vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size()); // cast descriptor array (number of items) to an int
@@ -884,7 +894,7 @@ private:
             vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data(); // data of attribute descriptions
 
             VkPipelineInputAssemblyStateCreateInfo inputAssembly{}; //type of geometry to be drawn is stated here
-
+            
             /*
             TOPOLOGY members for how to draw geometry:
 
@@ -1063,7 +1073,10 @@ private:
         pipelineInfo2.subpass = 0;
         pipelineInfo2.basePipelineHandle = VK_NULL_HANDLE;
 
-        if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo1, nullptr, &graphicsPipeline1) != VK_SUCCESS) { // pipeline 1 for view port 1
+
+        // seperate pipelines since I felt like I wanted to do this; could have put them all in 1 for a more efficent process... but meh
+        if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo1, nullptr, &graphicsPipeline1) != VK_SUCCESS) { // pipeline 1 for view port 1    -add pipeline cache/second thingy
+       
             throw std::runtime_error("failed to create graphics pipeline!");
         }
 
@@ -1545,117 +1558,142 @@ private:
     }
 
     void loadModel() {
+        
+        size_t positionOfNum;
 
-        if (MODEL_PATH == "model/doll base.obj") {
-
-      //      MODEL_PATH = "model/bugbear.obj";
-
-        }
-
-        else {
-
-        //    MODEL_PATH = "model/doll base.obj";
-
-        }
+        for (int loop = 0; loop <= modelCount; loop++) {
 
 
-        tinyobj::attrib_t attrib;
-        std::vector<tinyobj::shape_t> shapes; 
-        std::vector<tinyobj::material_t> materials;
-        std::string warn, err;
+            std::vector <uint32_t> tempIndice; // to add to the main vector of indices
+            std::vector <Vertex> tempVertices; // to add to the main vector of indices
 
-        if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, MODEL_PATH.c_str())) {
-            throw std::runtime_error(warn + err);
-        }
+            tinyobj::attrib_t attrib;// clear these values each read by reinitializing because I don't know if free and such works/how they work for these - rather do this for now since dead memory is a non-issue if it happens to exist 
+            std::vector<tinyobj::shape_t> shapes;
+            std::vector<tinyobj::material_t> materials;
+            std::string warn, err;
+            
 
-        std::unordered_map<Vertex, uint32_t> uniqueVertices{};
+            if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, MODEL_PATH.c_str())) {
+                throw std::runtime_error(warn + err);
+            }
 
-        for (const auto& shape : shapes) { // combine all faces into 1 model --> they are normally "seperate"
-            for (const auto& index : shape.mesh.indices) { //iterate through each indice in mesh
-                Vertex vertex{};
+            if (loop <= modelCount - 2) {
+                positionOfNum = MODEL_PATH.find(std::to_string(loop + 1));
+                MODEL_PATH.replace(positionOfNum, size_t(1), std::to_string(loop + 2)); // limits what numbers I can use, but I'm find because I dont care right now; not feeling like converting more of my models to obj's
+            }
 
-                vertex.pos = { 
-                    attrib.vertices[3 * index.vertex_index + 0], //since these are floats I multiply by 3?
-                    attrib.vertices[3 * index.vertex_index + 1],
-                    attrib.vertices[3 * index.vertex_index + 2]
-                };
-
-                vertex.texCoord = { // flip image vertically to fix model texture
-                    attrib.texcoords[2 * index.texcoord_index + 0], // this vector does not work if I do not set texcoods when making the obj
-                    1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
-                };
-
-                vertex.color = { 1.0f, 1.0f, 1.0f };
+            std::unordered_map<Vertex, uint32_t> uniqueVertices{};
 
 
-                if (uniqueVertices.count(vertex) == 0) { // count number of times a value appears in verticies array to make sure that it does not appear twice in the end result
-                    uniqueVertices[vertex] = static_cast<uint32_t>(vertices.size());
-                    vertices.push_back(vertex); //dump all vertex's in a vector for verticies
+
+
+            for (const auto& shape : shapes) { // combine all faces into 1 model --> they are normally "seperate"
+                for (const auto& index : shape.mesh.indices) { //iterate through each indice in mesh
+                    Vertex vertex{};
+
+                    vertex.pos = {
+                        attrib.vertices[3 * index.vertex_index + 0]+30*loop, //since these are floats I multiply by 3?
+                        attrib.vertices[3 * index.vertex_index + 1],
+                        attrib.vertices[3 * index.vertex_index + 2]
+                    };
+
+                    vertex.texCoord = { // flip image vertically to fix model texture
+                        attrib.texcoords[2 * index.texcoord_index + 0], // this vector does not work if I do not set texcoods when making the obj
+                        1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
+                    };
+
+                    vertex.color = { 1.0f, 1.0f, 1.0f };
+
+
+                    if (uniqueVertices.count(vertex) == 0) { // count number of times a value appears in verticies array to make sure that it does not appear twice in the end result
+                        uniqueVertices[vertex] = static_cast<uint32_t>(tempVertices.size());
+                        tempVertices.push_back(vertex); //dump all vertex's in a vector for verticies
+                    }
+
+                    tempIndice.push_back(uniqueVertices[vertex]); //add to unique vertex unordered map
                 }
 
-                indices.push_back(uniqueVertices[vertex]); //add to unique vertex unordered map
+
+
+
+
+                indices.push_back(tempIndice);
+                vertices.push_back(tempVertices);
             }
         }
-
     }
 
     void createVertexBuffer() {
-        VkDeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
+        for (int i = 0; i < vertices.size();i++) {
 
-        VkBuffer stagingBuffer; //buffer for mapped vertex data
-        VkDeviceMemory stagingBufferMemory; // memory buffer for memory allocation
-        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);//make buffer using a user made function
-        /*
-        meaning of flags:
-        VK_BUFFER_USAGE_TRANSFER_SRC_BIT: Buffer can be used as source in a memory transfer operation.
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT: Buffer can be used as destination in a memory transfer operation.
+            vertexBuffer.push_back(NULL);
+            vertexBufferMemory.push_back(NULL);
 
-        */
+            VkDeviceSize bufferSize = sizeof(vertices[i][0]) * vertices[i].size();
 
+            VkBuffer stagingBuffer; //buffer for mapped vertex data
+            VkDeviceMemory stagingBufferMemory; // memory buffer for memory allocation
+            createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);//make buffer using a user made function
+            /*
+            meaning of flags:
+            VK_BUFFER_USAGE_TRANSFER_SRC_BIT: Buffer can be used as source in a memory transfer operation.
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT: Buffer can be used as destination in a memory transfer operation.
 
-        void* data;
-        vkMapMemory(device, stagingBufferMemory, 0, bufferSize, 0, &data); // maps access a region of memory specified by an offset and size after delcaring device and memory looked at(offset is 0, size is bufferinfo.size). fourth var is flags (not using any, so made 0), final is were we dump the output data 
-        memcpy(data, vertices.data(), (size_t)bufferSize); // map data to vertice.data, with size of bufferSize
-        vkUnmapMemory(device, stagingBufferMemory); // unmap device and vertex buffer memory - waisted VRAM/RAM otherwise
-
-    // ways to map data (used way 1):
-    // 1. Use a memory heap that is host coherent, indicated with VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-    // 2.  Call vkFlushMappedMemoryRanges after writing to the mapped memory, and call vkInvalidateMappedMemoryRanges before reading from the mapped memory
+            */
 
 
-        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vertexBuffer, vertexBufferMemory); //make the buffer again using vertex buffer values versus buffer memory
+            void* data;
+            vkMapMemory(device, stagingBufferMemory, 0, bufferSize, 0, &data); // maps access a region of memory specified by an offset and size after delcaring device and memory looked at(offset is 0, size is bufferinfo.size). fourth var is flags (not using any, so made 0), final is were we dump the output data 
+            memcpy(data, vertices[i].data(), (size_t)bufferSize); // map data to vertice.data, with size of bufferSize
+            vkUnmapMemory(device, stagingBufferMemory); // unmap device and vertex buffer memory - waisted VRAM/RAM otherwise
+
+        // ways to map data (used way 1):
+        // 1. Use a memory heap that is host coherent, indicated with VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+        // 2.  Call vkFlushMappedMemoryRanges after writing to the mapped memory, and call vkInvalidateMappedMemoryRanges before reading from the mapped memory
 
 
-        copyBuffer(stagingBuffer, vertexBuffer, bufferSize); //user made function to copy buffer in a valid way
+            createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vertexBuffer[i], vertexBufferMemory[i]); //make the buffer again using vertex buffer values versus buffer memory
 
-        vkDestroyBuffer(device, stagingBuffer, nullptr);
-        vkFreeMemory(device, stagingBufferMemory, nullptr);
 
+            copyBuffer(stagingBuffer, vertexBuffer[i], bufferSize); //user made function to copy buffer in a valid way
+
+            vkDestroyBuffer(device, stagingBuffer, nullptr);
+            vkFreeMemory(device, stagingBufferMemory, nullptr);
+        }
     }
 
     // same as vertex buffer, but uses indices of vertex for refrence rather than vertex's
 
     void createIndexBuffer() { // make buffer for index of shape verticies --> look at create vertex buffer function for better explinations
-        VkDeviceSize bufferSize = sizeof(indices[0]) * indices.size(); // make a buffer size for the index buffer
-        // the size of the buffer is the number of indices multiplied by the var type (prevent out of bounds memory errors)
+        for (int i = 0; i < indices.size(); i++) {
 
-        VkBuffer stagingBuffer;
-        VkDeviceMemory stagingBufferMemory;
-        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+            indexBuffer.push_back(NULL);
+            indexBufferMemory.push_back(NULL);
 
-        void* data;
-        vkMapMemory(device, stagingBufferMemory, 0, bufferSize, 0, &data);
-        memcpy(data, indices.data(), (size_t)bufferSize);
-        vkUnmapMemory(device, stagingBufferMemory);
+            VkDeviceSize bufferSize = sizeof(indices[i][i]) * indices[i].size(); // make a buffer size for the index buffer
+            // the size of the buffer is the number of indices multiplied by the var type (prevent out of bounds memory errors)
 
-        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, indexBuffer, indexBufferMemory); // only other diffrence is the use of index_Buffer_bit rather than vertex_buffer_bit; this flag says we use a index buffer -- I think this is more for drivers than anything? 
+            VkBuffer stagingBuffer;
+            VkDeviceMemory stagingBufferMemory;
 
-        copyBuffer(stagingBuffer, indexBuffer, bufferSize);
+            createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
 
-        vkDestroyBuffer(device, stagingBuffer, nullptr);
-        vkFreeMemory(device, stagingBufferMemory, nullptr);
+            void* data;
+            vkMapMemory(device, stagingBufferMemory, 0, bufferSize, 0, &data);
+            memcpy(data, indices[i].data(), (size_t)bufferSize);
+            vkUnmapMemory(device, stagingBufferMemory);
+
+            createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, indexBuffer[i], indexBufferMemory[i]); // only other diffrence is the use of index_Buffer_bit rather than vertex_buffer_bit; this flag says we use a index buffer -- I think this is more for drivers than anything? 
+
+            copyBuffer(stagingBuffer, indexBuffer[i], bufferSize);
+
+
+            vkDestroyBuffer(device, stagingBuffer, nullptr);
+            vkFreeMemory(device, stagingBufferMemory, nullptr);
+            
+            
+        }
     }
-
 
     void createUniformBuffers() {
         VkDeviceSize bufferSize = sizeof(UniformBufferObject);
@@ -1834,10 +1872,11 @@ private:
 
 
     void createCommandBuffers() {
+
         commandBuffers.resize(swapChainFramebuffers.size()); // resize command buffers array to number of frame buffers because we should have graphics family queue filled with same number
 
         VkCommandBufferAllocateInfo allocInfo{};
-        allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO; // allocation struct?
+        allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO; // allocation info struct
         allocInfo.commandPool = commandPool; // fill command pool var to give settings and values to command buffer to use
         allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         allocInfo.commandBufferCount = (uint32_t)commandBuffers.size();
@@ -1859,7 +1898,7 @@ private:
         for (size_t i = 0; i < commandBuffers.size(); i++) { // for all command buffers do the following:
             VkCommandBufferBeginInfo beginInfo{};
             beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO; // command buffer info struct
-          // beginInfo.flags = 0; // default is 
+            beginInfo.flags = 0; // default is 
             beginInfo.pInheritanceInfo = nullptr; // Optional // for secondary command buffers, it says which state to inherit from the primary
             /*
             The flags parameter specifies how we're going to use the command buffer. The following values are available:
@@ -1910,18 +1949,32 @@ private:
 
             vkCmdBindPipeline(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline1); // second parameter says the pipeline is a graphics or compute pipeline; we said it is a graphics pipeline
 
-            VkBuffer vertexBuffers[] = { vertexBuffer }; // vertex buffer array preallocated with vertexBuffer made already
-            VkDeviceSize offsets[] = { 0 }; // make empty offsets array
+            std::vector <VkBuffer> vertexBuffers; // vertex buffer array preallocated with vertexBuffer made already   -  vertexBuffer[0] 
+            for (int i = 0; i < vertexBuffer.size(); i++) {
 
-            vkCmdBindVertexBuffers(commandBuffers[i], 0, 1, vertexBuffers, offsets); // bind to command buffer
+                vertexBuffers.push_back(vertexBuffer[i]);
 
-            vkCmdBindIndexBuffer(commandBuffers[i], indexBuffer, 0, VK_INDEX_TYPE_UINT32); // if any atribute is diffrent, we need to rebind data to the command buffer--> for the final flag, UINT32 can be used if we need it due to vertex count --> almost always need 32^32
-            //^^ --> we bind this by: commandBuffer being added too, index buffer being looked at, offset, type of parameters 
+            }
 
-            vkCmdBindDescriptorSets(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[i], 0, nullptr); // https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/vkCmdBindDescriptorSets.html
 
-            vkCmdDrawIndexed(commandBuffers[i], static_cast<uint32_t>(indices.size()), 1, 0, 0, 0); //draw the index buffer, using: command buffer, number of indices, number of instances, first index, vertex offset, and first instance (if more than 1 exists, otherwise make it 0)
+            
+            VkDeviceSize offsets[] = { 0 };
 
+            for (int y = 0; y < vertexBuffer.size(); y++) {
+
+              
+
+               // offsets[0] = { static_cast<unsigned long long> (5) * y }; // make empty offsets array
+
+                vkCmdBindVertexBuffers(commandBuffers[i], 0, 1, &vertexBuffers[y], offsets); // bind to command buffer
+
+                vkCmdBindIndexBuffer(commandBuffers[i], indexBuffer[y], 0, VK_INDEX_TYPE_UINT32); // if any atribute is diffrent, we need to rebind data to the command buffer--> for the final flag, UINT32 can be used if we need it due to vertex count --> almost always need 32^32
+                    //^^ --> we bind this by: commandBuffer being added too, index buffer being looked at, offset, type of parameters 
+
+                vkCmdBindDescriptorSets(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[i], 0, nullptr); // https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/vkCmdBindDescriptorSets.html
+
+                vkCmdDrawIndexed(commandBuffers[i], static_cast<uint32_t>(indices[y].size()), 1, 0, 0, 0); //draw the index buffer, using: command buffer, number of indices, number of instances, first index, vertex offset, and first instance (if more than 1 exists, otherwise make it 0)
+            }
 
             vkCmdEndRenderPass(commandBuffers[i]); // end render pass recording to the command buffer
 
@@ -1933,17 +1986,21 @@ private:
             renderPassInfo.renderArea.extent = swapChainExtent; //contrivutes to size of render area
 
             vkCmdBeginRenderPass(commandBuffers[i], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE); //reset render pass related to command buffers with renderpass info now - imbed inside primary buffer
-            vkCmdBindPipeline(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline2); // second parameter says the pipeline is a graphics or compute pipeline; we said it is a graphics pipeline
+            
+            for (int y = 0; y < vertexBuffer.size(); y++) {
+               
 
-            vkCmdBindVertexBuffers(commandBuffers[i], 0, 1, vertexBuffers, offsets); // bind to command buffer
+                vkCmdBindPipeline(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline2); // second parameter says the pipeline is a graphics or compute pipeline; we said it is a graphics pipeline
 
-            vkCmdBindIndexBuffer(commandBuffers[i], indexBuffer, 0, VK_INDEX_TYPE_UINT32); // if any atribute is diffrent, we need to rebind data to the command buffer--> for the final flag, UINT32 can be used if we need it due to vertex count --> almost always need 32^32
-            //^^ --> we bind this by: commandBuffer being added too, index buffer being looked at, offset, type of parameters 
+                vkCmdBindVertexBuffers(commandBuffers[i], 0, 1, &vertexBuffers[y], offsets); // bind to command buffer
 
-            vkCmdBindDescriptorSets(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[i], 0, nullptr); // https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/vkCmdBindDescriptorSets.html
+                vkCmdBindIndexBuffer(commandBuffers[i], indexBuffer[y], 0, VK_INDEX_TYPE_UINT32); // if any atribute is diffrent, we need to rebind data to the command buffer--> for the final flag, UINT32 can be used if we need it due to vertex count --> almost always need 32^32
+                //^^ --> we bind this by: commandBuffer being added too, index buffer being looked at, offset, type of parameters 
 
-            vkCmdDrawIndexed(commandBuffers[i], static_cast<uint32_t>(indices.size()), 1, 0, 0, 0); //draw the index buffer, using: command buffer, number of indices, number of instances, first index, vertex offset, and first instance (if more than 1 exists, otherwise make it 0)
+                vkCmdBindDescriptorSets(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[i], 0, nullptr); // https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/vkCmdBindDescriptorSets.html
 
+                vkCmdDrawIndexed(commandBuffers[i], static_cast<uint32_t>(indices[y].size()), 1, 0, 0, 0); //draw the index buffer, using: command buffer, number of indices, number of instances, first index, vertex offset, and first instance (if more than 1 exists, otherwise make it 0)
+            }
 
             vkCmdEndRenderPass(commandBuffers[i]); // end render pass recording to the command buffer
 
@@ -1978,7 +2035,7 @@ private:
     }
 
 
-    void updateUniformBuffer(uint32_t currentImage) {
+    void updateUniformBuffer(uint32_t currentImage) { // change model stuff here and views here... 
         
         if (XYspeed1.x != NULL) {
             XYspeed2 = XYspeed1;
@@ -2003,10 +2060,9 @@ private:
         
         //ubo.model = glm::rotate(glm::mat4(1.0f), glm::radians(0.0f+ radianPOSy), glm::vec3(0.0f, 0.0f, 1.0f)); //model power to rotate, angle to rotate, angle to rotate (x,y,z) rotate 
         //^ mouse controls model movment
-        ubo.model = glm::rotate(glm::mat4(1.0f), glm::radians(1.0f*5 + time*10000), glm::vec3(0.0f, 0.0f, 1.0f)); //model power to rotate, angle to rotate, angle to rotate (x,y,z) rotate 
-
+        ubo.model = glm::rotate(glm::mat4(1.0f), glm::radians(1.0f*5 + time*100), glm::vec3(0.0f, 0.0f, 1.0f)); //model power to rotate, angle to rotate, angle to rotate (x,y,z) rotate 
         ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-        ubo.proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float) swapChainExtent.height, 0.1f, 10.0f);
+        ubo.proj = glm::perspective(glm::radians(75.0f), swapChainExtent.width / (float) swapChainExtent.height, 0.1f, 10.0f);
         ubo.proj[1][1] *= -1;
 
         void* data;
