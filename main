@@ -45,11 +45,12 @@
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
 
-int modelCount = 9;
+const int modelCount = 6;
+const int textureCount = 3;
+
 std::string MODEL_PATH = "model/1.obj";
-std::string TEXTURE_PATH = "textures/texture.png";
-std::string MODEL_PATH2 = "model/2.obj";
-std::string TEXTURE_PATH2 = "textures/texture.png";
+std::string TEXTURE_PATH = "textures/1.png";
+
 
 
 const int MAX_FRAMES_IN_FLIGHT = 2;
@@ -174,6 +175,8 @@ struct UniformBufferObject {
     alignas(16) glm::mat4 model; //4x4 matrix --> alligned to 16 byte boundary
     alignas(16) glm::mat4 view; //4x4  --> alligned to 16 byte boundary
     alignas(16) glm::mat4 proj; //4x4  --> alligned to 16 byte boundary
+    alignas(16) float time; //4x4  --> alligned to 16 byte boundary
+
 };
 
 const std::vector<Vertex> vertices = { // array format:  {vertex pos, -1.0f to 1.0f (max to minimum)}, {r,g,b} (-1.0f is min, 1.0f is max)
@@ -211,6 +214,8 @@ private:
     POINT XYspeed1;
 
     POINT XYspeed2;
+
+    float projectionVarFUN = -1;
 
     int radianPOSx;
     int radianPOSy;
@@ -258,9 +263,9 @@ private:
     VkImageView depthImageView;
 
     uint32_t mipLevels; // mip maps are levels of images, farther away means smaller image, and that means less lines of code to parse through --> we divide by 2 each time to evenly get smaller images
-    VkImage textureImage;
-    VkDeviceMemory textureImageMemory;
-    VkImageView textureImageView;
+    std::vector <VkImage> textureImage{};
+    std::vector <VkDeviceMemory> textureImageMemory{};
+    std::vector <VkImageView> textureImageView;
     VkSampler textureSampler;
 
     std::vector < std::vector<Vertex> > vertices;
@@ -390,10 +395,16 @@ private:
         cleanupSwapChain();
 
         vkDestroySampler(device, textureSampler, nullptr);
-        vkDestroyImageView(device, textureImageView, nullptr);
 
-        vkDestroyImage(device, textureImage, nullptr); // clean image
-        vkFreeMemory(device, textureImageMemory, nullptr); // clean image
+        for (int i = 0; i < textureImage.size(); i++) {
+
+        vkDestroyImageView(device, textureImageView[i], nullptr);
+
+        
+            vkDestroyImage(device, textureImage[i], nullptr); // clean image
+            vkFreeMemory(device, textureImageMemory[i], nullptr); // clean image
+        }
+
 
         vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 
@@ -446,7 +457,26 @@ private:
         cleanupSwapChain(); // clean up the swap chain to make it again --> remake what needs to be updated for the next frame
         createSwapChain();
         createImageViews();
-        createRenderPass();
+        createRenderPass(); 
+        /*
+        
+        from https://marcelbraghetto.github.io/a-simple-triangle/2019/10/06/part-28/ <-- another amazing guy for helping me troubleshoot features with his written turtorial
+
+        : loop through each mesh instance in the meshes list to render
+
+  - get the mesh from the asset manager
+  - populate the push constants with the transformation matrix of the mesh
+  - bind the pipeline to the command buffer
+  - bind the vertex buffer for the mesh to the command buffer
+  - bind the index buffer for the mesh to the command buffer
+  - get the texture instance to apply to the mesh from the asset manager
+  - get the descriptor set for the texture that defines how it maps to the pipeline's descriptor set layout
+  - bind the descriptor set for the texture into the pipeline's descriptor set layout
+  - tell the command buffer to draw the mesh
+
+: end loop
+        
+        */
         createGraphicsPipeline();
         createColorResources();
         createDepthResources();
@@ -640,8 +670,8 @@ private:
         //store capabilitys of device and a bit more handling of capabilitys
 
 
-        uint32_t imageCount = swapChainSupport.capabilities.minImageCount + 1; // minimum images; we do 1 more to prevent the need for the driver to stall the program until another image can be added
-        if (swapChainSupport.capabilities.maxImageCount > 0 && imageCount > swapChainSupport.capabilities.maxImageCount) { // 0 means no maximum
+        uint32_t imageCount = textureCount; // minimum images; we do 1 more to prevent the need for the driver to stall the program until another image can be added
+        if (swapChainSupport.capabilities.maxImageCount < imageCount) { // 0 means no maximum
             imageCount = swapChainSupport.capabilities.maxImageCount; // 
         }
 
@@ -746,7 +776,7 @@ private:
         */
 
         //////////////////////////////////
-
+        
 
         VkAttachmentDescription depthAttachment{};
         depthAttachment.format = findDepthFormat(); // image format is the same as shown
@@ -966,7 +996,7 @@ private:
 
         rasterizer.polygonMode = VK_POLYGON_MODE_FILL; //fill polygon with fragments (more above ^) --> like everything, other than fill is a gpu feature
         rasterizer.lineWidth = 1.0f; //thickness of line when making image; I assume this can also allow the black border lines in borderland games to happen with little prof impact
-        rasterizer.cullMode = VK_CULL_MODE_BACK_BIT; //cull the front faces, back faces, or both.. invisible obj vibes in unity 
+        rasterizer.cullMode = VK_CULL_MODE_NONE; //cull the front faces, back faces, or both.. invisible obj vibes in unity  --> none means none are discarded
         rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE; //vertex order, to be front clockwise, or counter, or back
         rasterizer.depthBiasEnable = VK_FALSE;
 
@@ -1027,12 +1057,17 @@ private:
 
       
 
+        VkPushConstantRange pushConstantInfo = { 0 }; // pushconstant stuff
+        pushConstantInfo.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        pushConstantInfo.offset = 0;
+        pushConstantInfo.size = sizeof(glm::mat4);
 
         VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
         pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO; // pipeline info struct type
         pipelineLayoutInfo.setLayoutCount = 1; // descriptor array length if array
         pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout; // descriptors
-
+        pipelineLayoutInfo.pushConstantRangeCount = 1; // later make 1 per obj
+        pipelineLayoutInfo.pPushConstantRanges = &pushConstantInfo;
 
 
 
@@ -1040,6 +1075,7 @@ private:
             throw std::runtime_error("failed to create pipeline layout!");
         }
 
+        
 
         VkGraphicsPipelineCreateInfo pipelineInfo1{}; // compiles all info into 1 struct
         pipelineInfo1.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -1204,23 +1240,40 @@ private:
         return format == VK_FORMAT_D32_SFLOAT_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT; // top 3 are for getting format of deapth...
     }
 
-    void createTextureImage() {
+    void createTextureImage() { // get and make texture...
+        
+        std::vector <stbi_uc*> pixels{};
 
         int texWidth, texHeight, texChannels; // var for sizes
-        stbi_uc* pixels = stbi_load(TEXTURE_PATH.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha); // return from image chosen, the sizes, then colors, according to the color type of RGB and alpha
 
-        stbi_uc* pixels2 = stbi_load(TEXTURE_PATH2.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha); // return from image chosen, the sizes, then colors, according to the color type of RGB and alpha
-        //^ get second texture - I could make this dynamic, but I dont want to right now... plus its fairly simple, just automate the way I added a second texture
+        for (int i = 0; i < textureCount; i++) {
+            pixels.push_back(stbi_load(TEXTURE_PATH.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha)); // return from image chosen, the sizes, then colors, according to the color type of RGB and alpha
+        
+            if (i < textureCount) {
+                int positionOfNum = TEXTURE_PATH.find(std::to_string(i + 1));
+                TEXTURE_PATH.replace(positionOfNum, size_t(1), std::to_string(i + 2)); // limits what numbers I can use, but I'm find because I dont care right now; not feeling like converting more of my models to obj's
+            }
+        }
 
-        VkDeviceSize imageSize = texWidth * texHeight * 4; // make var the size of image for the RGBA values
+        TEXTURE_PATH = "textures/1.png";
 
+
+      //  TEXTURE_PATH.replace(1)
+
+        // NOT IMPLEMENTED YET ^ get second texture - I could make this dynamic, but I dont want to right now... plus its fairly simple, just automate the way I added a second texture
+
+        VkDeviceSize imageSize = texWidth * texHeight * 4; // make var the size of image for the RGBA values --> since we use PNG's we need Alpha
+        // made it so I only can use 1024x1024 images... This is not dynamic fully
         mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(texWidth, texHeight)))) + 1; // get number of mip maps that can be made from dividing by 2 --> the number of times the width or height (MAX means chose the larger) can be divided by 2 evenly. This is the mip map levels we can make
         //^ number of mipmap levels we can make        stbi_uc* pixels = stbi_load(TEXTURE_PATH.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha); // return from image chosen, the sizes, then colors, according to the color type of RGB and alpha
 
-
-        if (!pixels) { // if no pixels were found, throw a error
-            throw std::runtime_error("failed to load texture image!");
-        }
+        for (int i = 0; i < pixels.size(); i++) { // test pixels... 
+            if (!pixels[i]) { // if no pixels were found, throw a error
+                throw std::runtime_error("failed to load texture image!");
+            }
+        
+        textureImage.push_back(NULL); // pre make vector
+        textureImageMemory.push_back(NULL); // pre fill stuff
 
         VkBuffer stagingBuffer; // buffer for visible memory to handdle the texture
         VkDeviceMemory stagingBufferMemory;
@@ -1228,24 +1281,24 @@ private:
 
         void* data; 
         vkMapMemory(device, stagingBufferMemory, 0, imageSize, 0, &data); // map memoory in the quantity of pixel values to be added tp data
-        memcpy(data, pixels, static_cast<size_t>(imageSize)); // copy pixel values to data
+        memcpy(data, pixels[i], static_cast<size_t>(imageSize)); // copy pixel values to data
         vkUnmapMemory(device, stagingBufferMemory);
 
-        stbi_image_free(pixels); // empty array of pixels since data is storing it for now
+        stbi_image_free(pixels[i]); // empty array of pixels since data is storing it for now
 
-        createImage(texWidth, texHeight, mipLevels, VK_SAMPLE_COUNT_1_BIT, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, textureImage, textureImageMemory); // we use SRC and DST to say this image may be a source and destination  - since mipmaps may be used or taken from here
+        createImage(texWidth, texHeight, mipLevels, VK_SAMPLE_COUNT_1_BIT, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, textureImage[i], textureImageMemory[i]); // we use SRC and DST to say this image may be a source and destination  - since mipmaps may be used or taken from here
 
-        transitionImageLayout(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, mipLevels); // move the image, though we use transfer SRC to DST optimal since vulkan allows us to then move the mipmaps independent of an image
-        copyBufferToImage(stagingBuffer, textureImage, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
+        transitionImageLayout(textureImage[i], VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, mipLevels); // move the image, though we use transfer SRC to DST optimal since vulkan allows us to then move the mipmaps independent of an image
+        copyBufferToImage(stagingBuffer, textureImage[i], static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
         //transitioned to VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL while generating mipmaps <-- yes this is me using notes someone else made; the point of this is to learn, not be lazy
 
         vkDestroyBuffer(device, stagingBuffer, nullptr);
         vkFreeMemory(device, stagingBufferMemory, nullptr);
 
-        generateMipmaps(textureImage, VK_FORMAT_R8G8B8A8_SRGB, texWidth, texHeight, mipLevels);
+        generateMipmaps(textureImage[i], VK_FORMAT_R8G8B8A8_SRGB, texWidth, texHeight, mipLevels);
 
+     }
     }
-
 
     // THIS IS NORMALLY DONE BEFORE RUNTIME; THIS IS JUST BECAUSE IT IS EXTRA PRACTICE CODE
     void generateMipmaps(VkImage image, VkFormat imageFormat, int32_t texWidth, int32_t texHeight, uint32_t mipLevels) { // make mip maps
@@ -1366,7 +1419,9 @@ private:
     }
 
     void createTextureImageView() {
-        textureImageView = createImageView(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT, mipLevels); // makes the view for the acctual renderer... 
+        for (int i = 0; i < textureImage.size(); i++) {
+            textureImageView.push_back(createImageView(textureImage[i], VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT, mipLevels)); // makes the view for the acctual renderer... 
+        }
     }
 
     void createTextureSampler() {
@@ -1589,12 +1644,15 @@ private:
 
             for (const auto& shape : shapes) { // combine all faces into 1 model --> they are normally "seperate"
                 for (const auto& index : shape.mesh.indices) { //iterate through each indice in mesh
+                    
+
+                    
                     Vertex vertex{};
 
                     vertex.pos = {
-                        attrib.vertices[3 * index.vertex_index + 0]+30*loop, //since these are floats I multiply by 3?
-                        attrib.vertices[3 * index.vertex_index + 1],
-                        attrib.vertices[3 * index.vertex_index + 2]
+                        attrib.vertices[3 * index.vertex_index + 0]+1*loop, //since these are floats I multiply by 3?
+                        attrib.vertices[3 * index.vertex_index + 1] ,
+                        attrib.vertices[3 * index.vertex_index + 2] +1*loop // move obj pos
                     };
 
                     vertex.texCoord = { // flip image vertically to fix model texture
@@ -1702,7 +1760,7 @@ private:
         uniformBuffersMemory.resize(swapChainImages.size()); // resize to swap chain count --> array to handle images supplied
 
         for (size_t i = 0; i < swapChainImages.size(); i++) {
-            createBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, uniformBuffers[i], uniformBuffersMemory[i]);
+            createBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, uniformBuffers[i], uniformBuffersMemory[i]);
         }
     }
 
@@ -1711,26 +1769,33 @@ private:
 
     void createDescriptorPool() {
 
-        std::array<VkDescriptorPoolSize, 2> poolSizes{}; // pool for frame and a discriptor - 2 of em
-        poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER; // uniform buffer descriptor var
-        poolSizes[0].descriptorCount = static_cast<uint32_t>(swapChainImages.size()); // number of descriptors is images in swap chain
+        std::array<VkDescriptorPoolSize, textureCount*2> poolSizes{}; // pool for frame and a discriptor - 2 of em
         
-        // struct array part 2 below
-        poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; // sampler and fragment shader are working together
-        poolSizes[1].descriptorCount = static_cast<uint32_t>(swapChainImages.size()); // seocond this is used but for the second poolSize this time
+        for (int i = 0; i < (textureCount)*2; i+=2) {
+            poolSizes[i].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER; // uniform buffer descriptor var
+            poolSizes[i].descriptorCount = static_cast<uint32_t>(swapChainImages.size()); // number of descriptors is images in swap chain
+             // struct array part 2 
+            poolSizes[i + 1].descriptorCount = static_cast<uint32_t>(textureCount); // seocond this is used but for the second poolSize this time
+            poolSizes[i + 1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; // sampler and fragment shader are working together
 
-        VkDescriptorPoolCreateInfo poolInfo{}; // info of pool 
-        poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO; // info of pool type
-        poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size()); // number of pPoolSizes
-        poolInfo.pPoolSizes = poolSizes.data(); // poolsize var
-        poolInfo.maxSets = static_cast<uint32_t>(swapChainImages.size()); // max sets of discriptors (one for each discriptor
-        poolInfo.flags = 0; // can be VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT too allow changing it during runtime
-
-
-        if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS) { // make descriptor pool
-            throw std::runtime_error("failed to create descriptor pool!");
         }
+           
+
+            VkDescriptorPoolCreateInfo poolInfo{}; // info of pool 
+            poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO; // info of pool type
+            poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size()); // number of pPoolSizes
+            poolInfo.pPoolSizes = poolSizes.data(); // poolsize var
+            poolInfo.maxSets = static_cast<uint32_t>(textureCount); // max sets of discriptors (one for each discriptor
+            poolInfo.flags = 0; // can be VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT too allow changing it during runtime
+
+
+            if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS) { // make descriptor pool
+                throw std::runtime_error("failed to create descriptor pool!");
+            }
+
+        
     }
+
 
     void createDescriptorSets() {
         std::vector<VkDescriptorSetLayout> layouts(swapChainImages.size(), descriptorSetLayout); // make discriptor vector size of swap chain images count, and using descriptor set layout as a base layout
@@ -1741,7 +1806,7 @@ private:
         allocInfo.descriptorSetCount = static_cast<uint32_t>(swapChainImages.size()); // 
         allocInfo.pSetLayouts = layouts.data();
 
-        descriptorSets.resize(swapChainImages.size()); // origran expects vector size of descriptorSets equal to swap chain image count
+        descriptorSets.resize(textureCount); // origran expects vector size of descriptorSets equal to swap chain image count
         if (vkAllocateDescriptorSets(device, &allocInfo, descriptorSets.data()) != VK_SUCCESS) { // make descriptors, with allocInfo, and device, putting it inside the member "data" of DescriptorSets
             throw std::runtime_error("failed to allocate descriptor sets!");
         }
@@ -1754,7 +1819,7 @@ private:
 
             VkDescriptorImageInfo imageInfo{}; // image info var
             imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; // read only
-            imageInfo.imageView = textureImageView; // image view setup
+            imageInfo.imageView = textureImageView[i]; // image view setup
             imageInfo.sampler = textureSampler; // sampler for image
              // other members for image info struct can go here
 
@@ -1775,6 +1840,7 @@ private:
             descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
             descriptorWrites[1].descriptorCount = 1;
             descriptorWrites[1].pImageInfo = &imageInfo;  // using image info rather than buffer info since all image related vars are inside the imageInfo struct
+            
             
             
           //  descriptorWrite.pImageInfo = nullptr; // Optional - mess with image data
@@ -1890,7 +1956,6 @@ private:
         */
 
 
-
         if (vkAllocateCommandBuffers(device, &allocInfo, commandBuffers.data()) != VK_SUCCESS) { // fill command buffers
             throw std::runtime_error("failed to allocate command buffers!");
         }
@@ -1908,18 +1973,17 @@ private:
                 VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT : The command buffer can be resubmitted while it is also already pending execution.
                 */
 
-            if (vkBeginCommandBuffer(commandBuffers[i], &beginInfo) != VK_SUCCESS) { // reset the buffer
+            if (vkBeginCommandBuffer(commandBuffers[i], &beginInfo) != VK_SUCCESS) { // reset the buffer --> // I can use my loops to sync or un sync textures (also need to change bind descriptor index  ;)
                 throw std::runtime_error("failed to begin recording command buffer!");
             }
 
-            
 
             VkRenderPassBeginInfo renderPassInfo{}; // make render pass info to render
             renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO; // type of struct
             renderPassInfo.renderPass = renderPass; // render pass its self
             renderPassInfo.framebuffer = swapChainFramebuffers[i]; //attachment/buffer
             renderPassInfo.renderArea.offset = { 0, 0 };  // to push render area size x or y values
-            renderPassInfo.renderArea.extent = swapChainExtent; //contrivutes to size of render area
+            renderPassInfo.renderArea.extent = swapChainExtent; //contributes to size of render area <-- I really should make 2 of these, one for each view... but it really is not important currently
 
             
 
@@ -1939,7 +2003,7 @@ private:
             vkCmdBeginRenderPass(commandBuffers[i], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE); //reset render pass related to command buffers with renderpass info now - imbed inside primary buffer
             
                                                                     
-                                                                                                  
+
                                                                                                   /*
 
             VK_SUBPASS_CONTENTS_INLINE: The render pass commands will be embedded in the primary command buffer itself and no secondary command buffers will be executed.
@@ -1956,13 +2020,16 @@ private:
 
             }
 
-
+            
             
             VkDeviceSize offsets[] = { 0 };
 
-            for (int y = 0; y < vertexBuffer.size(); y++) {
+            for (int y = 0; y < vertexBuffer.size(); y++) { 
 
-              
+                glm::mat4 matrix = glm::mat4(2.0);
+                vkCmdPushConstants(commandBuffers[i], pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(matrix), &matrix); // not done
+                // try each of these: https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/VkShaderStageFlagBits.html
+             
 
                // offsets[0] = { static_cast<unsigned long long> (5) * y }; // make empty offsets array
 
@@ -1971,7 +2038,11 @@ private:
                 vkCmdBindIndexBuffer(commandBuffers[i], indexBuffer[y], 0, VK_INDEX_TYPE_UINT32); // if any atribute is diffrent, we need to rebind data to the command buffer--> for the final flag, UINT32 can be used if we need it due to vertex count --> almost always need 32^32
                     //^^ --> we bind this by: commandBuffer being added too, index buffer being looked at, offset, type of parameters 
 
-                vkCmdBindDescriptorSets(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[i], 0, nullptr); // https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/vkCmdBindDescriptorSets.html
+                // THIS ONE JUST MAKES 2 IDENTICAL but diffrent textured VIEWS - I have a funny idea that I may show someone... want this here    vkCmdBindDescriptorSets(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[0], 0, nullptr); // https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/vkCmdBindDescriptorSets.html
+
+                //offset moves texture...
+                vkCmdBindDescriptorSets(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[std::clamp(y-2,0,textureCount-1)], 0, nullptr); // https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/vkCmdBindDescriptorSets.html
+
 
                 vkCmdDrawIndexed(commandBuffers[i], static_cast<uint32_t>(indices[y].size()), 1, 0, 0, 0); //draw the index buffer, using: command buffer, number of indices, number of instances, first index, vertex offset, and first instance (if more than 1 exists, otherwise make it 0)
             }
@@ -1997,7 +2068,10 @@ private:
                 vkCmdBindIndexBuffer(commandBuffers[i], indexBuffer[y], 0, VK_INDEX_TYPE_UINT32); // if any atribute is diffrent, we need to rebind data to the command buffer--> for the final flag, UINT32 can be used if we need it due to vertex count --> almost always need 32^32
                 //^^ --> we bind this by: commandBuffer being added too, index buffer being looked at, offset, type of parameters 
 
-                vkCmdBindDescriptorSets(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[i], 0, nullptr); // https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/vkCmdBindDescriptorSets.html
+               // THIS ONE JUST MAKES 2 IDENTICAL but diffrent textured VIEWS - I have a funny idea that I may show someone... want this here vkCmdBindDescriptorSets(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[1], 0, nullptr); // https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/vkCmdBindDescriptorSets.html
+
+                vkCmdBindDescriptorSets(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[std::clamp(y-1, 0, textureCount - 1)], 0, nullptr); // https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/vkCmdBindDescriptorSets.html
+
 
                 vkCmdDrawIndexed(commandBuffers[i], static_cast<uint32_t>(indices[y].size()), 1, 0, 0, 0); //draw the index buffer, using: command buffer, number of indices, number of instances, first index, vertex offset, and first instance (if more than 1 exists, otherwise make it 0)
             }
@@ -2011,6 +2085,10 @@ private:
         }
     }
    
+
+ //   void moveObjects(std::vector <VkBuffer> vertices) {
+
+  //  }
 
     void createSyncObjects() {
         imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT); // like this we will always have enough space for semaphores to render the correct image at the right time, same for below; otherwise we will be out of sync for rendering frames
@@ -2034,6 +2112,7 @@ private:
         }
     }
 
+    //int projectionVarFUN; // im'a put this here for ctrl f surfing
 
     void updateUniformBuffer(uint32_t currentImage) { // change model stuff here and views here... 
         
@@ -2042,13 +2121,14 @@ private:
         }
         GetCursorPos(&XYspeed1);
 
+        //spin
         int netspeedx = XYspeed1.x - XYspeed2.x;
         int netspeedy = XYspeed1.y - XYspeed2.y;
         
         radianPOSx+= netspeedx;
         
         radianPOSy+= netspeedy;
-
+        //spin
         
 
         static auto startTime = std::chrono::high_resolution_clock::now();
@@ -2056,6 +2136,7 @@ private:
         auto currentTime = std::chrono::high_resolution_clock::now();
         float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
+        
         UniformBufferObject ubo{};
         
         //ubo.model = glm::rotate(glm::mat4(1.0f), glm::radians(0.0f+ radianPOSy), glm::vec3(0.0f, 0.0f, 1.0f)); //model power to rotate, angle to rotate, angle to rotate (x,y,z) rotate 
@@ -2063,12 +2144,22 @@ private:
         ubo.model = glm::rotate(glm::mat4(1.0f), glm::radians(1.0f*5 + time*100), glm::vec3(0.0f, 0.0f, 1.0f)); //model power to rotate, angle to rotate, angle to rotate (x,y,z) rotate 
         ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
         ubo.proj = glm::perspective(glm::radians(75.0f), swapChainExtent.width / (float) swapChainExtent.height, 0.1f, 10.0f);
-        ubo.proj[1][1] *= -1;
+        ubo.proj[1][1] *= projectionVarFUN;
 
+      //  projectionVarFUN += (projectionVarFUN > -0.8) ? -0.001 : 0.1; // bouncy bois'
+
+      
+        
+        
+        
+ 
         void* data;
+
         vkMapMemory(device, uniformBuffersMemory[currentImage], 0, sizeof(ubo), 0, &data);
             memcpy(data, &ubo, sizeof(ubo));
         vkUnmapMemory(device, uniformBuffersMemory[currentImage]);
+
+
     }
 
 
@@ -2363,6 +2454,7 @@ VK_PRESENT_MODE_MAILBOX_KHR: This is another variation of the second mode. Inste
         std::vector<VkLayerProperties> availableLayers(layerCount);
         vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.data());
 
+
         for (const char* layerName : validationLayers) {
             bool layerFound = false;
 
@@ -2377,7 +2469,7 @@ VK_PRESENT_MODE_MAILBOX_KHR: This is another variation of the second mode. Inste
                 return false;
             }
         }
-
+     
         return true;
     }
      
