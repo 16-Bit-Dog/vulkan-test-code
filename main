@@ -175,7 +175,7 @@ struct UniformBufferObject {
     alignas(16) glm::mat4 model; //4x4 matrix --> alligned to 16 byte boundary
     alignas(16) glm::mat4 view; //4x4  --> alligned to 16 byte boundary
     alignas(16) glm::mat4 proj; //4x4  --> alligned to 16 byte boundary
-    alignas(16) float time; //4x4  --> alligned to 16 byte boundary
+   
 
 };
 
@@ -209,6 +209,9 @@ public:
     }
 
 private:
+
+
+
     GLFWwindow* window; // make window var
 
     POINT XYspeed1;
@@ -225,6 +228,8 @@ private:
     int score;
     std::chrono::system_clock::time_point timeStart;
     std::chrono::system_clock::time_point timeEnd;
+    
+    std::chrono::steady_clock::time_point startTime = std::chrono::high_resolution_clock::now();
 
     VkInstance instance; // make instance for vulkan
     VkDebugUtilsMessengerEXT debugMessenger; // debugger var
@@ -256,7 +261,6 @@ private:
     VkImage colorImage;
     VkDeviceMemory colorImageMemory;
     VkImageView colorImageView;
-
 
     VkImage depthImage;
     VkDeviceMemory depthImageMemory;
@@ -1056,18 +1060,12 @@ private:
         ////if you want to change pipeline adjustable values during runtime without making a new pipeline you can use VkDynamicState:
 
       
-
-        VkPushConstantRange pushConstantInfo = { 0 }; // pushconstant stuff
-        pushConstantInfo.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-        pushConstantInfo.offset = 0;
-        pushConstantInfo.size = sizeof(glm::mat4);
-
         VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
         pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO; // pipeline info struct type
         pipelineLayoutInfo.setLayoutCount = 1; // descriptor array length if array
         pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout; // descriptors
-        pipelineLayoutInfo.pushConstantRangeCount = 1; // later make 1 per obj
-        pipelineLayoutInfo.pPushConstantRanges = &pushConstantInfo;
+        pipelineLayoutInfo.pushConstantRangeCount = 0; 
+        pipelineLayoutInfo.pPushConstantRanges = 0; // changed my approach to use something else
 
 
 
@@ -2000,38 +1998,34 @@ private:
             renderPassInfo.pClearValues = clearValues.data(); // add what are clear values
 
 
-            vkCmdBeginRenderPass(commandBuffers[i], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE); //reset render pass related to command buffers with renderpass info now - imbed inside primary buffer
             
-                                                                    
-
-                                                                                                  /*
+                                          
+                                                                                               /*
 
             VK_SUBPASS_CONTENTS_INLINE: The render pass commands will be embedded in the primary command buffer itself and no secondary command buffers will be executed.
             VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS: The render pass commands will be executed from secondary command buffers.
 
             */
 
-            vkCmdBindPipeline(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline1); // second parameter says the pipeline is a graphics or compute pipeline; we said it is a graphics pipeline
-
+            
             std::vector <VkBuffer> vertexBuffers; // vertex buffer array preallocated with vertexBuffer made already   -  vertexBuffer[0] 
+            
+            VkDeviceSize offsets[] = { 0 };
+                
             for (int i = 0; i < vertexBuffer.size(); i++) {
 
                 vertexBuffers.push_back(vertexBuffer[i]);
 
             }
 
-            
-            
-            VkDeviceSize offsets[] = { 0 };
 
-            for (int y = 0; y < vertexBuffer.size(); y++) { 
+            vkCmdBeginRenderPass(commandBuffers[i], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE); //reset render pass related to command buffers with renderpass info now - imbed inside primary buffer
 
-                glm::mat4 matrix = glm::mat4(2.0);
-                vkCmdPushConstants(commandBuffers[i], pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(matrix), &matrix); // not done
-                // try each of these: https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/VkShaderStageFlagBits.html
-             
 
-               // offsets[0] = { static_cast<unsigned long long> (5) * y }; // make empty offsets array
+            for (int y = 0; y < vertexBuffer.size(); y++) {
+
+                // tried each of these: https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/VkShaderStageFlagBits.html
+                vkCmdBindPipeline(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline1); // second parameter says the pipeline is a graphics or compute pipeline; we said it is a graphics pipeline
 
                 vkCmdBindVertexBuffers(commandBuffers[i], 0, 1, &vertexBuffers[y], offsets); // bind to command buffer
 
@@ -2041,12 +2035,13 @@ private:
                 // THIS ONE JUST MAKES 2 IDENTICAL but diffrent textured VIEWS - I have a funny idea that I may show someone... want this here    vkCmdBindDescriptorSets(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[0], 0, nullptr); // https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/vkCmdBindDescriptorSets.html
 
                 //offset moves texture...
-                vkCmdBindDescriptorSets(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[std::clamp(y-2,0,textureCount-1)], 0, nullptr); // https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/vkCmdBindDescriptorSets.html
-
+                vkCmdBindDescriptorSets(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[std::clamp(y - 2, 0, textureCount - 1)], 0, nullptr); // https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/vkCmdBindDescriptorSets.html
 
                 vkCmdDrawIndexed(commandBuffers[i], static_cast<uint32_t>(indices[y].size()), 1, 0, 0, 0); //draw the index buffer, using: command buffer, number of indices, number of instances, first index, vertex offset, and first instance (if more than 1 exists, otherwise make it 0)
-            }
 
+
+
+            }
             vkCmdEndRenderPass(commandBuffers[i]); // end render pass recording to the command buffer
 
             // add             vkCmdBindPipeline(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline1); // second parameter says the pipeline is a graphics or compute pipeline; we said it is a graphics pipeline
@@ -2072,7 +2067,6 @@ private:
 
                 vkCmdBindDescriptorSets(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[std::clamp(y-1, 0, textureCount - 1)], 0, nullptr); // https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/vkCmdBindDescriptorSets.html
 
-
                 vkCmdDrawIndexed(commandBuffers[i], static_cast<uint32_t>(indices[y].size()), 1, 0, 0, 0); //draw the index buffer, using: command buffer, number of indices, number of instances, first index, vertex offset, and first instance (if more than 1 exists, otherwise make it 0)
             }
 
@@ -2089,6 +2083,7 @@ private:
  //   void moveObjects(std::vector <VkBuffer> vertices) {
 
   //  }
+
 
     void createSyncObjects() {
         imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT); // like this we will always have enough space for semaphores to render the correct image at the right time, same for below; otherwise we will be out of sync for rendering frames
@@ -2114,7 +2109,7 @@ private:
 
     //int projectionVarFUN; // im'a put this here for ctrl f surfing
 
-    void updateUniformBuffer(uint32_t currentImage) { // change model stuff here and views here... 
+    void updateUniformBuffer(uint32_t currentImage) { // change model stuff here and views here...  --> each image handles model
         
         if (XYspeed1.x != NULL) {
             XYspeed2 = XYspeed1;
@@ -2131,7 +2126,7 @@ private:
         //spin
         
 
-        static auto startTime = std::chrono::high_resolution_clock::now();
+        
 
         auto currentTime = std::chrono::high_resolution_clock::now();
         float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
@@ -2141,16 +2136,24 @@ private:
         
         //ubo.model = glm::rotate(glm::mat4(1.0f), glm::radians(0.0f+ radianPOSy), glm::vec3(0.0f, 0.0f, 1.0f)); //model power to rotate, angle to rotate, angle to rotate (x,y,z) rotate 
         //^ mouse controls model movment
-        ubo.model = glm::rotate(glm::mat4(1.0f), glm::radians(1.0f*5 + time*100), glm::vec3(0.0f, 0.0f, 1.0f)); //model power to rotate, angle to rotate, angle to rotate (x,y,z) rotate 
+        ubo.model = glm::rotate(glm::mat4(1.0f), glm::radians(1.0f*5 + time*currentImage*time*20), glm::vec3(0.0f, 0.0f, 1.0f)); //model power to rotate, angle to rotate, angle to rotate (x,y,z) rotate 
+        ubo.model *= glm::translate(glm::mat4(1.0), glm::vec3(1, 1, 1 * time/2));
+        ubo.model *= glm::scale(glm::mat4(1.0), glm::vec3(1,1*time,1));
         ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
         ubo.proj = glm::perspective(glm::radians(75.0f), swapChainExtent.width / (float) swapChainExtent.height, 0.1f, 10.0f);
         ubo.proj[1][1] *= projectionVarFUN;
 
       //  projectionVarFUN += (projectionVarFUN > -0.8) ? -0.001 : 0.1; // bouncy bois'
 
-      
-        
-        
+        if (time > 2) {
+
+            startTime = std::chrono::high_resolution_clock::now();
+
+            ubo.model = glm::mat4(1.0f);
+
+            time = 0; 
+
+        }
         
  
         void* data;
