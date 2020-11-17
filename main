@@ -39,8 +39,7 @@
 #include <unordered_map>
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
-
-
+#include <shaderc/shaderc.h>
 
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
@@ -207,11 +206,9 @@ public:
         mainLoop();
         cleanup();
     }
-
+    
 private:
-
-
-
+    
     GLFWwindow* window; // make window var
 
     POINT XYspeed1;
@@ -893,6 +890,10 @@ private:
 
 
         void createGraphicsPipeline() {
+
+
+            std::string tempName = "compile.bat";
+            system(tempName.c_str());
 
             auto vertShaderCode = readFile("shaders/vert.spv"); // byte file is loaded
             auto fragShaderCode = readFile("shaders/frag.spv"); // ^
@@ -2137,23 +2138,14 @@ private:
         //ubo.model = glm::rotate(glm::mat4(1.0f), glm::radians(0.0f+ radianPOSy), glm::vec3(0.0f, 0.0f, 1.0f)); //model power to rotate, angle to rotate, angle to rotate (x,y,z) rotate 
         //^ mouse controls model movment
         ubo.model = glm::rotate(glm::mat4(1.0f), glm::radians(1.0f*5 + time*currentImage*time*20), glm::vec3(0.0f, 0.0f, 1.0f)); //model power to rotate, angle to rotate, angle to rotate (x,y,z) rotate 
-        ubo.model *= glm::translate(glm::mat4(1.0), glm::vec3(1, 1, 1 * time/2));
-        ubo.model *= glm::scale(glm::mat4(1.0), glm::vec3(1,1*time,1));
+        ubo.model *= glm::translate(glm::mat4(1.0), glm::vec3(1, 1, 1 * sin(time * 7.5)));
+        ubo.model *= glm::scale(glm::mat4(1.0), glm::vec3(1,1*sin(time* 7.5),1));
         ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
         ubo.proj = glm::perspective(glm::radians(75.0f), swapChainExtent.width / (float) swapChainExtent.height, 0.1f, 10.0f);
         ubo.proj[1][1] *= projectionVarFUN;
 
       //  projectionVarFUN += (projectionVarFUN > -0.8) ? -0.001 : 0.1; // bouncy bois'
 
-        if (time > 2) {
-
-            startTime = std::chrono::high_resolution_clock::now();
-
-            ubo.model = glm::mat4(1.0f);
-
-            time = 0; 
-
-        }
         
  
         void* data;
