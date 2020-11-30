@@ -10,6 +10,9 @@
 
 // just so I remember: indices[] is the array for loaded model verticies
 
+
+// for testing purposes on a laptop, vsync was turned on --> if (availablePresentMode == VK_PRESENT_MODE_IMMEDIATE_KHR)    <-- that controls it, uncomment to turn off vsync to immediately feed frames
+
 #define GLM_ENABLE_EXPERIMENTAL
 #include <../glm/gtx/hash.hpp>
 #define GLFW_INCLUDE_VULKAN
@@ -40,6 +43,8 @@
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
 #include <shaderc/shaderc.h>
+
+
 
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
@@ -342,7 +347,31 @@ private:
         createCommandBuffers();
         createSyncObjects();
     }
-    
+    struct enviorment {
+
+        VkPipeline EnviormentPipe;
+        VkDescriptorSet EnviormentDescript;
+
+
+        std::vector<VkBuffer> EnviormentUniformBuffers;
+        std::vector<VkDeviceMemory> EnviormentUniformBufferMem;
+
+
+        struct lightpos {
+
+            float z;
+
+            float y;
+
+            float x;
+
+        };
+
+    } enviorment;
+
+ 
+
+
     void mainLoop() {
         while (!glfwWindowShouldClose(window)) { // if close flag for "window" is true 
             glfwPollEvents(); // call all processes to finish processing (I assume to close it)
@@ -2108,6 +2137,7 @@ private:
         }
     }
 
+
     //int projectionVarFUN; // im'a put this here for ctrl f surfing
 
     void updateUniformBuffer(uint32_t currentImage) { // change model stuff here and views here...  --> each image handles model
@@ -2125,7 +2155,6 @@ private:
         
         radianPOSy+= netspeedy;
         //spin
-        
 
         
 
@@ -2300,9 +2329,9 @@ VK_PRESENT_MODE_MAILBOX_KHR: This is another variation of the second mode. Inste
         
         
         for (const auto& availablePresentMode : availablePresentModes) { //for everything inside availablePresentModes do the following
-            if (availablePresentMode == VK_PRESENT_MODE_IMMEDIATE_KHR) { // check for mode support for just forcing hardware to run without vsync
-                return availablePresentMode;
-            }
+         //   if (availablePresentMode == VK_PRESENT_MODE_IMMEDIATE_KHR) { // check for mode support for just forcing hardware to run without vsync
+         //       return availablePresentMode;
+         //   }
         }
 
         return VK_PRESENT_MODE_FIFO_KHR; // this mode is always avaible, so if push comes to shove just use this
