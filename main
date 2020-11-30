@@ -272,7 +272,15 @@ private:
     std::vector <VkImage> textureImage{};
     std::vector <VkDeviceMemory> textureImageMemory{};
     std::vector <VkImageView> textureImageView;
+    
+    std::vector <VkImage> MiniTextureImage{}; // one off creation for testing <-- not used in public
+    std::vector <VkDeviceMemory> MiniTextureImageMemory{};
+    std::vector <VkImageView> MiniTextureImageView{};
+    int MiniTextureCount;
+
     VkSampler textureSampler;
+
+
 
     std::vector < std::vector<Vertex> > vertices;
     std::vector < std::vector<uint32_t> > indices; // loading indices var; is for vertexes to be stored --> this is a vector of vector to allow storage of many models dynamically... yes I'm inconsistant... lucky this is my personal project...
@@ -347,27 +355,7 @@ private:
         createCommandBuffers();
         createSyncObjects();
     }
-    struct enviorment {
 
-        VkPipeline EnviormentPipe;
-        VkDescriptorSet EnviormentDescript;
-
-
-        std::vector<VkBuffer> EnviormentUniformBuffers;
-        std::vector<VkDeviceMemory> EnviormentUniformBufferMem;
-
-
-        struct lightpos {
-
-            float z;
-
-            float y;
-
-            float x;
-
-        };
-
-    } enviorment;
 
  
 
@@ -434,7 +422,16 @@ private:
             vkDestroyImage(device, textureImage[i], nullptr); // clean image
             vkFreeMemory(device, textureImageMemory[i], nullptr); // clean image
         }
+        for (int i = 0; i < MiniTextureImage.size(); i++) {
 
+
+            vkDestroyImageView(device, MiniTextureImageView[i], nullptr);
+
+
+            vkDestroyImage(device, MiniTextureImage[i], nullptr); // clean image
+            vkFreeMemory(device, MiniTextureImageMemory[i], nullptr); // clean image
+
+        }
 
         vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 
@@ -689,6 +686,8 @@ private:
         vkGetDeviceQueue(device, indices.graphicsFamily.value(), 0, &graphicsQueue);
         vkGetDeviceQueue(device, indices.presentFamily.value(), 0, &presentQueue);
     }
+
+
 
     void createSwapChain() {
         SwapChainSupportDetails swapChainSupport = querySwapChainSupport(physicalDevice);
@@ -1268,6 +1267,63 @@ private:
         return format == VK_FORMAT_D32_SFLOAT_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT; // top 3 are for getting format of deapth...
     }
 
+
+    void createMiniTextureImage(std::string TexPath, int CurrentMiniImage) { // get and make texture...
+
+        MiniTextureCount+=1;
+
+        stbi_uc* pixels;
+
+        int texWidth, texHeight, texChannels; // var for sizes
+
+ 
+            pixels = stbi_load(TexPath.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha); // return from image chosen, the sizes, then colors, according to the color type of RGB and alpha
+
+        TexPath = "textures/1.png";
+
+
+        //  TEXTURE_PATH.replace(1)
+
+          // NOT IMPLEMENTED YET ^ get second texture - I could make this dynamic, but I dont want to right now... plus its fairly simple, just automate the way I added a second texture
+
+        VkDeviceSize imageSize = texWidth * texHeight * 4; // make var the size of image for the RGBA values --> since we use PNG's we need Alpha
+        // made it so I only can use 1024x1024 images... This is not dynamic fully
+        mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(texWidth, texHeight)))) + 1; // get number of mip maps that can be made from dividing by 2 --> the number of times the width or height (MAX means chose the larger) can be divided by 2 evenly. This is the mip map levels we can make
+        //^ number of mipmap levels we can make        stbi_uc* pixels = stbi_load(TEXTURE_PATH.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha); // return from image chosen, the sizes, then colors, according to the color type of RGB and alpha
+
+
+            if (!pixels) { // if no pixels were found, throw a error
+                throw std::runtime_error("failed to load texture image!");
+          
+
+            MiniTextureImage.push_back(NULL); // pre make vector
+            MiniTextureImageMemory.push_back(NULL); // pre fill stuff
+
+            VkBuffer stagingBuffer; // buffer for visible memory to handdle the texture
+            VkDeviceMemory stagingBufferMemory;
+            createBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory); //make buffer the size of image size, with certain properties
+
+            void* data;
+            vkMapMemory(device, stagingBufferMemory, 0, imageSize, 0, &data); // map memoory in the quantity of pixel values to be added tp data
+            memcpy(data, pixels, static_cast<size_t>(imageSize)); // copy pixel values to data
+            vkUnmapMemory(device, stagingBufferMemory);
+
+            stbi_image_free(pixels); // empty array of pixels since data is storing it for now
+
+            createImage(texWidth, texHeight, mipLevels, VK_SAMPLE_COUNT_1_BIT, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, MiniTextureImage[CurrentMiniImage], MiniTextureImageMemory[CurrentMiniImage]); // we use SRC and DST to say this image may be a source and destination  - since mipmaps may be used or taken from here
+
+            transitionImageLayout(MiniTextureImage[CurrentMiniImage], VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, mipLevels); // move the image, though we use transfer SRC to DST optimal since vulkan allows us to then move the mipmaps independent of an image
+            copyBufferToImage(stagingBuffer, MiniTextureImage[CurrentMiniImage], static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
+            //transitioned to VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL while generating mipmaps <-- yes this is me using notes someone else made; the point of this is to learn, not be lazy
+
+            vkDestroyBuffer(device, stagingBuffer, nullptr);
+            vkFreeMemory(device, stagingBufferMemory, nullptr);
+
+            generateMipmaps(MiniTextureImage[CurrentMiniImage], VK_FORMAT_R8G8B8A8_SRGB, texWidth, texHeight, mipLevels);
+
+        }
+    }
+
     void createTextureImage() { // get and make texture...
         
         std::vector <stbi_uc*> pixels{};
@@ -1444,6 +1500,12 @@ private:
         if (counts & VK_SAMPLE_COUNT_2_BIT) { return VK_SAMPLE_COUNT_2_BIT; }
 
         return VK_SAMPLE_COUNT_1_BIT; // return 1 if others are not supported
+    }
+
+    void createMiniTextureImageView(int miniImage) { // all mini versions are for 1 time texture creations
+
+        MiniTextureImageView[miniImage] = createImageView(MiniTextureImage[miniImage], VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT, mipLevels); // makes the view for the acctual renderer... 
+        
     }
 
     void createTextureImageView() {
@@ -1845,6 +1907,7 @@ private:
             bufferInfo.offset = 0; // no offset
             bufferInfo.range = sizeof(UniformBufferObject); // descriptor updates bytes (we want to update the amount of a Uniform Buffer Object... 
 
+
             VkDescriptorImageInfo imageInfo{}; // image info var
             imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; // read only
             imageInfo.imageView = textureImageView[i]; // image view setup
@@ -1878,6 +1941,17 @@ private:
         }
     }
 
+    void swapTextureImage(int ImageToReplace, int MiniToReplaceWith) { // not used yet
+        
+        VkImageView tempMini = MiniTextureImageView[MiniToReplaceWith];
+
+        VkImageView tempReg = textureImageView[ImageToReplace];
+
+        memcpy(textureImageView[ImageToReplace], tempMini, sizeof(VkImageView)); // copy memory so I don't need to keep track of tempMini image   --> move images used
+
+        memcpy(MiniTextureImageView[MiniToReplaceWith], tempReg, sizeof(VkImageView)); // copy memory so I don't need to keep track of tempRegular image --> move image mini over to regular views
+
+    }
 
     void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory) { // we can make many diffrent buffers with this function parameter
 
